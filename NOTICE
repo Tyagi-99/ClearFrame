@@ -1,0 +1,8 @@
+ClearFrame includes a measured Gemini sparkle alpha map and reverse-blend
+technique derived from seeb4-erase:
+
+https://github.com/seeb4coding/seeb4-erase
+MIT License, Copyright (c) 2026 seeb4coding
+
+Video read/write uses Mediabunny (MPL-2.0):
+https://github.com/Vanilagy/mediabunny

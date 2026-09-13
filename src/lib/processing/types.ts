@@ -16,6 +16,15 @@ export type PixelBox = {
   size: number;
 };
 
+export type PixelRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type CleanerTarget = "gemini" | "other";
+
 export type NormalizedRegion = {
   x: number;
   y: number;
@@ -75,6 +84,7 @@ export type ProcessingOptions = {
   previewDuration: PreviewDuration;
   customPreviewSeconds?: number;
   detectionSensitivity: DetectionSensitivity;
+  target?: CleanerTarget;
   region?: NormalizedRegion;
   lockRegion?: boolean;
 };

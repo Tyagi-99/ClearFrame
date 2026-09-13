@@ -35,7 +35,7 @@ export function createProcessingEngine(
       const kind = classifyFile(source);
       if (kind === "image") {
         const buffer = await decodeImageFile(source);
-        return processPixelBuffer(buffer).detection;
+        return (await processPixelBuffer(buffer)).detection;
       }
       return detectVideoFile(source);
     },
@@ -44,7 +44,7 @@ export function createProcessingEngine(
       const kind = classifyFile(source);
       if (kind === "image") {
         const original = await decodeImageFile(source);
-        const { cleaned, detection, stats } = processPixelBuffer(original, options);
+        const { cleaned, detection, stats } = await processPixelBuffer(original, options);
         const blob = await encodePng(cleaned);
         return {
           original,
@@ -98,14 +98,27 @@ export function createProcessingEngine(
       abort = new AbortController();
       const kind = classifyFile(source);
       if (kind === "image") {
-        onProgress({
-          stage: "cleaning",
-          ratio: 0.4,
-          percent: 40,
-          message: "Cleaning frames...",
-        });
+        if (options.target === "other") {
+          onProgress({
+            stage: "preparing",
+            ratio: 0.08,
+            percent: 8,
+            message: "Loading fill model…",
+          });
+        } else {
+          onProgress({
+            stage: "cleaning",
+            ratio: 0.4,
+            percent: 40,
+            message: "Cleaning frames...",
+          });
+        }
         const original = await decodeImageFile(source);
-        const { cleaned, detection, stats } = processPixelBuffer(original, options);
+        const { cleaned, detection, stats } = await processPixelBuffer(
+          original,
+          options,
+          onProgress,
+        );
         const blob = await encodePng(cleaned);
         onProgress({
           stage: "finalizing",

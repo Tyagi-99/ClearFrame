@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/collapsible";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ComparisonSlider } from "@/components/comparison-slider";
+import { RegionEditor } from "@/components/workspace/region-editor";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { capabilityLabel, getClientCapabilities } from "@/lib/capabilities";
 import { FILE_LIMITS } from "@/lib/config";
@@ -21,8 +22,10 @@ import { toUserError } from "@/lib/errors";
 import { extractMetadata } from "@/lib/media/metadata";
 import { formatBytes, formatDuration, parseMediaKind, validateFile } from "@/lib/media/validate";
 import { createProcessingEngine } from "@/lib/processing/engine";
+import { defaultOtherRegion } from "@/lib/processing/geometry";
 
 import type {
+  CleanerTarget,
   DetectionResult,
   MediaKind,
   MediaMetadata,
@@ -39,12 +42,35 @@ const DEFAULT_OPTIONS: ProcessingOptions = {
   engine: "webcodecs",
   previewDuration: 5,
   detectionSensitivity: "auto",
+  target: "gemini",
 };
+
+function otherDetection(width: number, height: number): DetectionResult {
+  const region = defaultOtherRegion();
+  return {
+    detected: true,
+    profileId: "other-manual",
+    confidence: 1,
+    score: 1,
+    region,
+    box: {
+      x: Math.round(region.x * width),
+      y: Math.round(region.y * height),
+      size: Math.round(Math.min(region.width * width, region.height * height)),
+    },
+    markSize: 8,
+    anchored: false,
+    lowConfidence: false,
+    message: null,
+  };
+}
 
 export function WorkspaceApp({ initialKind = "video" }: { initialKind?: MediaKind }) {
   const router = useRouter();
   const engine = useMemo(() => createProcessingEngine(), []);
   const [mediaKind, setMediaKind] = useState<MediaKind>(initialKind);
+  const [target, setTarget] = useState<CleanerTarget>("gemini");
+  const [previewOnly, setPreviewOnly] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [cleanedUrl, setCleanedUrl] = useState<string | null>(null);
@@ -83,6 +109,7 @@ export function WorkspaceApp({ initialKind = "video" }: { initialKind?: MediaKin
     setProgress(null);
     setStage("idle");
     setError(null);
+    setPreviewOnly(false);
   }, [cleanedUrl, engine, objectUrl]);
 
   const selectKind = useCallback(
@@ -113,10 +140,16 @@ export function WorkspaceApp({ initialKind = "video" }: { initialKind?: MediaKin
       try {
         const meta = await extractMetadata(next);
         setMetadata(meta);
-        const found = await engine.detectWatermark(next);
-        setDetection(found);
+        if (target === "other") {
+          setDetection(otherDetection(meta.width, meta.height));
+          setAdjusting(true);
+        } else {
+          const found = await engine.detectWatermark(next);
+          setDetection(found);
+          setAdjusting(false);
+          if (found.message) toast.message(found.message);
+        }
         setStage("ready");
-        if (found.message) toast.message(found.message);
       } catch (err) {
         const message = toUserError(err);
         setError(message);
@@ -124,17 +157,17 @@ export function WorkspaceApp({ initialKind = "video" }: { initialKind?: MediaKin
         toast.error(message);
       }
     },
-    [cleanedUrl, engine, mediaKind, objectUrl],
+    [cleanedUrl, engine, mediaKind, objectUrl, target],
   );
 
   const process = useCallback(
     async (preview: boolean) => {
       if (!file) return;
-      if (detection && !detection.detected && !adjusting) {
+      if (target === "gemini" && detection && !detection.detected && !adjusting) {
         toast.error("We couldn't confidently identify a supported visible overlay.");
         return;
       }
-      if (detection?.lowConfidence && !adjusting) {
+      if (target === "gemini" && detection?.lowConfidence && !adjusting) {
         toast.message(
           "We found something that may be a supported watermark, but confidence is low.",
         );
@@ -145,7 +178,8 @@ export function WorkspaceApp({ initialKind = "video" }: { initialKind?: MediaKin
       try {
         const workingOptions: ProcessingOptions = {
           ...options,
-          region: adjusting && detection ? detection.region : options.region,
+          target,
+          region: detection?.region ?? options.region,
           customPreviewSeconds: preview
             ? options.previewDuration === 10
               ? 10
@@ -157,8 +191,10 @@ export function WorkspaceApp({ initialKind = "video" }: { initialKind?: MediaKin
         setCleanedUrl(URL.createObjectURL(processed.blob));
         setResult(processed);
         setDetection(processed.detection);
+        setPreviewOnly(Boolean(preview && metadata?.kind === "video"));
         setStage("done");
         track("processing_completed");
+        if (processed.detection.message) toast.message(processed.detection.message);
       } catch (err) {
         const message = toUserError(err);
         setError(message);
@@ -167,7 +203,7 @@ export function WorkspaceApp({ initialKind = "video" }: { initialKind?: MediaKin
         toast.error(message);
       }
     },
-    [adjusting, cleanedUrl, detection, engine, file, options],
+    [adjusting, cleanedUrl, detection, engine, file, metadata, options, target],
   );
 
   const onDrop = (event: React.DragEvent) => {
@@ -238,6 +274,20 @@ export function WorkspaceApp({ initialKind = "video" }: { initialKind?: MediaKin
                 Photo
               </ToggleGroupItem>
             </ToggleGroup>
+            <ToggleGroup
+              value={[target]}
+              onValueChange={(next) => {
+                if (next[0] === "other" || next[0] === "gemini") setTarget(next[0]);
+              }}
+              className="mb-8 border border-border p-1"
+            >
+              <ToggleGroupItem value="gemini" aria-label="Gemini overlay">
+                Gemini
+              </ToggleGroupItem>
+              <ToggleGroupItem value="other" aria-label="Other text or logo">
+                Other
+              </ToggleGroupItem>
+            </ToggleGroup>
             <p className="text-2xl font-medium tracking-tight">
               {mediaKind === "image" ? "Drop your photo here" : "Drop your video here"}
             </p>
@@ -272,8 +322,9 @@ export function WorkspaceApp({ initialKind = "video" }: { initialKind?: MediaKin
             </p>
             <p className="mt-6 text-sm">Your media stays on your device.</p>
             <p className="mt-1 max-w-md text-sm text-muted-foreground">
-              Processing happens locally in your browser. Your{" "}
-              {mediaKind === "image" ? "photo" : "video"} is never uploaded.
+              {target === "other"
+                ? "Draw a tight box on the mark after upload. Fill runs locally in your browser. Gemini overlay cleaning stays on Gemini."
+                : "Processing happens locally in your browser. Your file is never uploaded."}
             </p>
           </div>
         ) : null}
@@ -281,30 +332,45 @@ export function WorkspaceApp({ initialKind = "video" }: { initialKind?: MediaKin
         {file && metadata && objectUrl ? (
           <div className="grid gap-8 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)]">
             <div className="flex flex-col gap-4">
-              {cleanedUrl && metadata.kind === "image" ? (
-                <ComparisonSlider before={objectUrl} after={cleanedUrl} />
+              {cleanedUrl ? (
+                <ComparisonSlider
+                  before={objectUrl}
+                  after={cleanedUrl}
+                  aspectRatio={metadata.width / metadata.height}
+                  kind={metadata.kind}
+                />
+              ) : detection && (target === "other" || adjusting) ? (
+                <RegionEditor
+                  region={detection.region}
+                  onChange={(region) => setDetection({ ...detection, region })}
+                >
+                  {metadata.kind === "video" ? (
+                    <video
+                      src={objectUrl}
+                      controls
+                      className="h-auto w-full"
+                      style={{ aspectRatio: `${metadata.width} / ${metadata.height}` }}
+                    />
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={objectUrl} alt="Source" className="h-auto w-full" />
+                  )}
+                </RegionEditor>
               ) : (
                 <div className="overflow-hidden rounded-xl bg-muted">
                   {metadata.kind === "video" ? (
                     <video
-                      src={cleanedUrl ?? objectUrl}
+                      src={objectUrl}
                       controls
-                      className="aspect-video w-full"
+                      className="h-auto w-full"
+                      style={{ aspectRatio: `${metadata.width} / ${metadata.height}` }}
                     />
                   ) : (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={objectUrl} alt="Source" className="w-full" />
+                    <img src={objectUrl} alt="Source" className="h-auto w-full" />
                   )}
                 </div>
               )}
-              {detection && adjusting ? (
-                <RegionOverlay
-                  src={objectUrl}
-                  detection={detection}
-                  adjusting={adjusting}
-                  onChange={setDetection}
-                />
-              ) : null}
             </div>
 
             <aside className="flex flex-col gap-6">
@@ -323,7 +389,7 @@ export function WorkspaceApp({ initialKind = "video" }: { initialKind?: MediaKin
                 ) : null}
               </div>
 
-              {detection ? (
+              {detection && target === "gemini" ? (
                 <div className="rounded-xl border border-border p-4">
                   <p className="text-sm text-muted-foreground">Watermark detection</p>
                   <p className="mt-2 text-2xl font-medium">
@@ -345,20 +411,43 @@ export function WorkspaceApp({ initialKind = "video" }: { initialKind?: MediaKin
                 </div>
               ) : null}
 
+              {target === "other" ? (
+                <div className="rounded-xl border border-border p-4">
+                  <p className="text-sm text-muted-foreground">Other (manual)</p>
+                  <p className="mt-2 text-sm">
+                    Draw a tight box on the date stamp or logo, then preview. The first run
+                    downloads a local fill model (about 200 MB), then it stays cached.
+                  </p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Reconstruction happens on-device. This is not Gemini overlay cleaning, and it
+                    does not remove SynthID or C2PA.
+                  </p>
+                  {detection?.message ? (
+                    <p className="mt-3 text-sm text-muted-foreground">{detection.message}</p>
+                  ) : null}
+                </div>
+              ) : null}
+
               <div className="flex flex-col gap-2">
-                <Button
-                  variant={adjusting ? "secondary" : "outline"}
-                  onClick={() => setAdjusting((value) => !value)}
-                >
-                  {adjusting ? "Region locked" : "Adjust Region"}
-                </Button>
-                {metadata.kind === "video" ? (
-                  <Button variant="outline" onClick={() => void process(true)} disabled={stage === "working"}>
-                    Generate Preview
+                {target === "gemini" ? (
+                  <Button
+                    variant={adjusting ? "secondary" : "outline"}
+                    onClick={() => setAdjusting((value) => !value)}
+                  >
+                    {adjusting ? "Region locked" : "Adjust Region"}
                   </Button>
                 ) : null}
+                <Button
+                  variant="outline"
+                  onClick={() => void process(metadata.kind === "video")}
+                  disabled={stage === "working"}
+                >
+                  Preview result
+                </Button>
                 <Button onClick={() => void process(false)} disabled={stage === "working"}>
-                  Clean Entire {metadata.kind === "video" ? "Video" : "Image"}
+                  {target === "other"
+                    ? "Clean selected area"
+                    : `Clean Entire ${metadata.kind === "video" ? "Video" : "Image"}`}
                 </Button>
                 {stage === "working" ? (
                   <Button
@@ -457,9 +546,9 @@ export function WorkspaceApp({ initialKind = "video" }: { initialKind?: MediaKin
         {stage === "done" && result ? (
           <div className="flex flex-col gap-4 rounded-xl border border-border p-5">
             <p className="font-medium">
-              {result.mimeType.startsWith("image/")
-                ? "Image cleaned successfully"
-                : "Video cleaned successfully"}
+              {previewOnly
+                ? "Preview ready. Check the slider in the original ratio."
+                : "Preview ready. Check the slider, then download."}
             </p>
             <p className="text-sm text-muted-foreground">
               {result.width} × {result.height}
@@ -470,17 +559,23 @@ export function WorkspaceApp({ initialKind = "video" }: { initialKind?: MediaKin
               {`  ${formatBytes(result.sizeBytes)}`}
             </p>
             <div className="flex flex-wrap gap-2">
-              <Button
-                nativeButton={false}
-                render={
-                  <a
-                    href={cleanedUrl ?? undefined}
-                    download={result.filename}
-                  />
-                }
-              >
-                Download {result.mimeType === "image/png" ? "PNG" : "MP4"}
-              </Button>
+              {previewOnly ? (
+                <Button onClick={() => void process(false)}>
+                  Clean full file
+                </Button>
+              ) : (
+                <Button
+                  nativeButton={false}
+                  render={
+                    <a
+                      href={cleanedUrl ?? undefined}
+                      download={result.filename}
+                    />
+                  }
+                >
+                  Download {result.mimeType === "image/png" ? "PNG" : "MP4"}
+                </Button>
+              )}
               <Button variant="outline" onClick={reset}>
                 Process Another
               </Button>
@@ -504,63 +599,6 @@ function regionLabel(detection: DetectionResult): string {
   const horizontal = x > 0.66 ? "right" : x < 0.33 ? "left" : "center";
   const vertical = y > 0.66 ? "Bottom" : y < 0.33 ? "Top" : "Middle";
   return `${vertical}-${horizontal}`;
-}
-
-function RegionOverlay({
-  src,
-  detection,
-  adjusting,
-  onChange,
-}: {
-  src: string;
-  detection: DetectionResult;
-  adjusting: boolean;
-  onChange: (detection: DetectionResult) => void;
-}) {
-  const boxRef = useRef<HTMLDivElement>(null);
-  return (
-    <div className="relative overflow-hidden rounded-xl border border-border">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt="" className="w-full opacity-80" />
-      <div
-        ref={boxRef}
-        className="absolute border border-signal"
-        style={{
-          left: `${detection.region.x * 100}%`,
-          top: `${detection.region.y * 100}%`,
-          width: `${detection.region.width * 100}%`,
-          height: `${detection.region.height * 100}%`,
-        }}
-        onPointerDown={(event) => {
-          if (!adjusting) return;
-          const parent = event.currentTarget.parentElement;
-          if (!parent) return;
-          const start = parent.getBoundingClientRect();
-          const originX = event.clientX;
-          const originY = event.clientY;
-          const region = { ...detection.region };
-          const move = (next: PointerEvent) => {
-            const dx = (next.clientX - originX) / start.width;
-            const dy = (next.clientY - originY) / start.height;
-            onChange({
-              ...detection,
-              region: {
-                ...region,
-                x: Math.max(0, Math.min(1 - region.width, region.x + dx)),
-                y: Math.max(0, Math.min(1 - region.height, region.y + dy)),
-              },
-            });
-          };
-          const up = () => {
-            window.removeEventListener("pointermove", move);
-            window.removeEventListener("pointerup", up);
-          };
-          window.addEventListener("pointermove", move);
-          window.addEventListener("pointerup", up);
-        }}
-      />
-    </div>
-  );
 }
 
 

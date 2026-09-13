@@ -19,7 +19,7 @@ async function runDetect() {
   if (!file || !metadata) throw new Error("No file loaded.");
   if (metadata.kind === "image") {
     const buffer = await decodeImageFile(file);
-    const { detection } = processPixelBuffer(buffer);
+    const { detection } = await processPixelBuffer(buffer);
     post({ type: "DETECTION_RESULT", detection });
     return;
   }
@@ -35,7 +35,7 @@ async function runProcess(options: ProcessingOptions, preview: boolean) {
 
   if (kind === "image") {
     const buffer = await decodeImageFile(file);
-    const { cleaned, detection, stats } = processPixelBuffer(buffer, options);
+    const { cleaned, detection, stats } = await processPixelBuffer(buffer, options);
     const blob = await encodePng(cleaned);
     post({
       type: "COMPLETE",

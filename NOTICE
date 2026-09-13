@@ -6,3 +6,10 @@ MIT License, Copyright (c) 2026 seeb4coding
 
 Video read/write uses Mediabunny (MPL-2.0):
 https://github.com/Vanilagy/mediabunny
+
+Other-mode fill uses LaMa ONNX weights from Carve/LaMa-ONNX
+(Apache-2.0), loaded at runtime and cached in the browser:
+https://huggingface.co/Carve/LaMa-ONNX
+
+ONNX Runtime Web (MIT):
+https://github.com/microsoft/onnxruntime

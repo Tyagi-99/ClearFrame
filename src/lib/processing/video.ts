@@ -3,6 +3,9 @@ import { USER_ERRORS } from "@/lib/errors";
 import { QUALITY_BITRATE_SCALE } from "@/lib/config";
 import { detectWatermark, cleanBuffer } from "./detect";
 import { bufferFromImageData } from "./buffer";
+import { defaultOtherRegion, normalizedToRect } from "./geometry";
+import { inpaintRect } from "./inpaint";
+import type { LamaRunner } from "./lama";
 import type {
   DetectionResult,
   ProcessingOptions,
@@ -121,22 +124,57 @@ export async function processVideoFile(
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("Could not open a drawing surface for this video.");
 
-  const detection = await detectVideoTrack(videoTrack, duration, ctx, width, height);
+  const other = options.target === "other";
+  const region = options.region ?? (other ? defaultOtherRegion() : undefined);
+  let lamaRunner: LamaRunner | null = null;
+  let lamaApi: typeof import("./lama") | null = null;
+  if (other) {
+    hooks.onProgress?.({
+      stage: "preparing",
+      ratio: 0.08,
+      percent: 8,
+      message: "Loading fill model…",
+    });
+    try {
+      lamaApi = await import("./lama");
+      lamaRunner = await lamaApi.getLamaRunner((ratio, message) =>
+        hooks.onProgress?.({
+          stage: "preparing",
+          ratio,
+          percent: Math.round(ratio * 100),
+          message,
+        }),
+      );
+    } catch {
+      lamaRunner = null;
+      lamaApi = null;
+    }
+  }
+  const detection: DetectionResult = other
+    ? {
+        detected: true,
+        profileId: "other-manual",
+        confidence: 1,
+        score: 1,
+        region: region ?? defaultOtherRegion(),
+        box: { x: 0, y: 0, size: 8 },
+        markSize: 8,
+        anchored: false,
+        lowConfidence: false,
+        message: null,
+      }
+    : await detectVideoTrack(videoTrack, duration, ctx, width, height);
+  if (region) detection.region = region;
   hooks.onDetection?.(detection);
 
-  if (options.region) {
-    detection.region = options.region;
-  }
-
-  const lockedBox = options.region
+  const lockedBox = region
     ? {
-        x: Math.round(options.region.x * width),
-        y: Math.round(options.region.y * height),
-        size: Math.round(
-          ((options.region.width * width) + (options.region.height * height)) / 2,
-        ),
+        x: Math.round(region.x * width),
+        y: Math.round(region.y * height),
+        size: Math.round(((region.width * width) + (region.height * height)) / 2),
       }
     : detection.box;
+  const lockedRect = normalizedToRect(detection.region, width, height);
 
   let lastStats: ReconstructionStats | null = null;
   let frames = 0;
@@ -158,7 +196,7 @@ export async function processVideoFile(
     video: {
       forceTranscode: true,
       quality: new Quality(qualityFor(options)),
-      process: (sample) => {
+      process: async (sample) => {
         if (hooks.signal?.aborted) {
           sample.close();
           throw new DOMException("Processing cancelled", "AbortError");
@@ -169,7 +207,26 @@ export async function processVideoFile(
         }
         sample.draw(ctx, 0, 0);
         const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        lastStats = cleanBuffer(bufferFromImageData(image), lockedBox);
+        const pixels = bufferFromImageData(image);
+        if (other) {
+          if (lamaRunner && lamaApi) {
+            const filled = await lamaApi.inpaintWithLama(pixels, lockedRect, {
+              runner: lamaRunner,
+            });
+            if (filled.fallback && !detection.message) {
+              detection.message =
+                "Fill model unavailable. Used a simple blend instead — the result may look patched.";
+            }
+          } else {
+            inpaintRect(pixels, lockedRect);
+            if (!detection.message) {
+              detection.message =
+                "Fill model unavailable. Used a simple blend instead — the result may look patched.";
+            }
+          }
+        } else {
+          lastStats = cleanBuffer(pixels, lockedBox);
+        }
         ctx.putImageData(image, 0, 0);
         frames += 1;
         return canvas;

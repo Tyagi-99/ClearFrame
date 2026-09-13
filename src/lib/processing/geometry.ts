@@ -1,4 +1,4 @@
-import type { NormalizedRegion, PixelBox } from "./types";
+import type { NormalizedRegion, PixelBox, PixelRect } from "./types";
 
 export const REFERENCE = { size: 48, inset: 73 } as const;
 export const VIDEO_SCALE_HEIGHT = 720;
@@ -67,5 +67,37 @@ export function clampBox(box: PixelBox, width: number, height: number): PixelBox
     x: Math.max(0, Math.min(width - size, Math.round(box.x))),
     y: Math.max(0, Math.min(height - size, Math.round(box.y))),
     size,
+  };
+}
+
+export function defaultOtherRegion(): NormalizedRegion {
+  return { x: 0.72, y: 0.88, width: 0.24, height: 0.08 };
+}
+
+export function normalizedToRect(
+  region: NormalizedRegion,
+  width: number,
+  height: number,
+): PixelRect {
+  const w = Math.max(8, Math.round(region.width * width));
+  const h = Math.max(8, Math.round(region.height * height));
+  return {
+    x: Math.max(0, Math.min(width - w, Math.round(region.x * width))),
+    y: Math.max(0, Math.min(height - h, Math.round(region.y * height))),
+    width: Math.min(w, width),
+    height: Math.min(h, height),
+  };
+}
+
+export function rectToNormalized(
+  rect: PixelRect,
+  width: number,
+  height: number,
+): NormalizedRegion {
+  return {
+    x: rect.x / width,
+    y: rect.y / height,
+    width: rect.width / width,
+    height: rect.height / height,
   };
 }

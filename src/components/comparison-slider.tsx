@@ -9,6 +9,8 @@ type Props = {
   beforeLabel?: string;
   afterLabel?: string;
   className?: string;
+  aspectRatio?: number;
+  kind?: "image" | "video";
 };
 
 export function ComparisonSlider({
@@ -17,9 +19,12 @@ export function ComparisonSlider({
   beforeLabel = "Original",
   afterLabel = "Cleaned",
   className,
+  aspectRatio,
+  kind = "image",
 }: Props) {
   const [amount, setAmount] = useState(52);
   const track = useRef<HTMLDivElement>(null);
+  const ratio = aspectRatio && aspectRatio > 0 ? aspectRatio : 16 / 9;
 
   function setFromClientX(clientX: number) {
     const rect = track.current?.getBoundingClientRect();
@@ -28,13 +33,19 @@ export function ComparisonSlider({
     setAmount(Math.max(2, Math.min(98, next)));
   }
 
+  const mediaClass = "absolute inset-0 size-full object-contain bg-black/20";
+
   return (
     <div
       ref={track}
       className={cn(
-        "relative aspect-video w-full overflow-hidden rounded-xl bg-muted select-none",
+        "relative mx-auto overflow-hidden rounded-xl bg-muted select-none",
         className,
       )}
+      style={{
+        aspectRatio: String(ratio),
+        width: `min(100%, calc(72vh * ${ratio}))`,
+      }}
       onPointerDown={(event) => {
         event.currentTarget.setPointerCapture(event.pointerId);
         setFromClientX(event.clientX);
@@ -44,14 +55,22 @@ export function ComparisonSlider({
         setFromClientX(event.clientX);
       }}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={after} alt={afterLabel} className="absolute inset-0 size-full object-cover" />
+      {kind === "video" ? (
+        <video src={after} className={mediaClass} controls playsInline muted />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={after} alt={afterLabel} className={mediaClass} />
+      )}
       <div
         className="absolute inset-0 overflow-hidden"
         style={{ clipPath: `inset(0 ${100 - amount}% 0 0)` }}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={before} alt={beforeLabel} className="absolute inset-0 size-full object-cover" />
+        {kind === "video" ? (
+          <video src={before} className={mediaClass} muted playsInline />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={before} alt={beforeLabel} className={mediaClass} />
+        )}
       </div>
       <div
         className="absolute inset-y-0 z-10 w-px bg-white/80"

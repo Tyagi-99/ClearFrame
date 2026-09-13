@@ -1,22 +1,83 @@
 import { cloneBuffer } from "./buffer";
 import { detectWatermark, cleanBuffer } from "./detect";
-import { normalizedToBox } from "./geometry";
+import { defaultOtherRegion, normalizedToBox, normalizedToRect } from "./geometry";
 import { DEFAULT_RECONSTRUCTION } from "./reconstruct";
 import type {
   DetectionResult,
   PixelBuffer,
   ProcessingOptions,
+  ProcessingProgress,
   ReconstructionStats,
 } from "./types";
 
-export function processPixelBuffer(
+function emptyStats(box: DetectionResult["box"]): ReconstructionStats {
+  return {
+    box,
+    quality: 1,
+    markAmplitude: 0,
+    residualAmplitude: 0,
+    clipped: 0,
+    touched: 0,
+    lost: 0,
+    diffused: 0,
+    alphaPeak: 0,
+    opacityUsed: 1,
+    gainSolved: null,
+  };
+}
+
+function otherDetection(
+  source: PixelBuffer,
+  region = defaultOtherRegion(),
+): DetectionResult {
+  const rect = normalizedToRect(region, source.width, source.height);
+  return {
+    detected: true,
+    profileId: "other-manual",
+    confidence: 1,
+    score: 1,
+    region,
+    box: { x: rect.x, y: rect.y, size: Math.min(rect.width, rect.height) },
+    markSize: Math.min(rect.width, rect.height),
+    anchored: false,
+    lowConfidence: false,
+    message: null,
+  };
+}
+
+export async function processPixelBuffer(
   source: PixelBuffer,
   options: Partial<ProcessingOptions> = {},
-): {
+  onProgress?: (progress: ProcessingProgress) => void,
+): Promise<{
   cleaned: PixelBuffer;
   detection: DetectionResult;
   stats: ReconstructionStats;
-} {
+}> {
+  if (options.target === "other") {
+    const detection = otherDetection(source, options.region ?? defaultOtherRegion());
+    const cleaned = cloneBuffer(source);
+    const { inpaintWithLama } = await import("./lama");
+    const result = await inpaintWithLama(
+      cleaned,
+      normalizedToRect(detection.region, source.width, source.height),
+      {
+        onProgress: (ratio, message) =>
+          onProgress?.({
+            stage: "preparing",
+            ratio,
+            percent: Math.round(ratio * 100),
+            message,
+          }),
+      },
+    );
+    if (result.fallback) {
+      detection.message =
+        "Fill model unavailable. Used a simple blend instead — the result may look patched.";
+    }
+    return { cleaned, detection, stats: emptyStats(detection.box) };
+  }
+
   const detection = detectWatermark(source);
   if (options.region) {
     detection.box = normalizedToBox(options.region, source.width, source.height);

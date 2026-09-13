@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local LaMa weights (fetched at runtime, never bundled)
+/public/models/*.onnx

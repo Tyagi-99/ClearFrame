@@ -28,7 +28,7 @@ export function SiteHeader({ compact = false }: { compact?: boolean }) {
         <div className="flex items-center gap-2">
           <ThemeToggle />
           {!compact ? (
-            <Button nativeButton={false} render={<Link href="/app" />} size="sm">
+            <Button nativeButton={false} render={<Link href="/app?kind=video" />} size="sm">
               Clean a Video
             </Button>
           ) : null}

@@ -23,11 +23,11 @@ export default function HomePage() {
               Remove supported visible AI-generation overlays directly in your browser. Fast, private, and designed for creators.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Button nativeButton={false} render={<Link href="/app" />} size="lg">
+              <Button nativeButton={false} render={<Link href="/app?kind=video" />} size="lg">
                 Clean a Video
               </Button>
-              <Button nativeButton={false} render={<Link href="/how-it-works" />} variant="outline" size="lg">
-                How it works
+              <Button nativeButton={false} render={<Link href="/app?kind=image" />} variant="outline" size="lg">
+                Clean a Photo
               </Button>
             </div>
             <p className="mt-6 text-sm text-muted-foreground">
@@ -47,10 +47,10 @@ export default function HomePage() {
           </h2>
           <ol className="mt-10 grid gap-8 md:grid-cols-4">
             {[
-              ["Upload", "Choose your video."],
+              ["Upload", "Choose your video or photo."],
               ["Detect", "The application identifies supported visible watermark patterns."],
-              ["Clean", "The browser processes the video locally."],
-              ["Download", "Save the processed MP4."],
+              ["Clean", "The browser processes the file locally."],
+              ["Download", "Save the processed MP4 or PNG."],
             ].map(([title, body], index) => (
               <li key={title} className="flex flex-col gap-2">
                 <span className="font-mono text-xs text-signal">{String(index + 1).padStart(2, "0")}</span>

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -10,6 +11,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ComparisonSlider } from "@/components/comparison-slider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { capabilityLabel, getClientCapabilities } from "@/lib/capabilities";
@@ -17,17 +19,18 @@ import { FILE_LIMITS } from "@/lib/config";
 import { track } from "@/lib/analytics";
 import { toUserError } from "@/lib/errors";
 import { extractMetadata } from "@/lib/media/metadata";
-import { formatBytes, formatDuration, validateFile } from "@/lib/media/validate";
+import { formatBytes, formatDuration, parseMediaKind, validateFile } from "@/lib/media/validate";
 import { createProcessingEngine } from "@/lib/processing/engine";
 
 import type {
   DetectionResult,
+  MediaKind,
   MediaMetadata,
   ProcessedMedia,
   ProcessingOptions,
   ProcessingProgress,
 } from "@/lib/processing/types";
-import { CaretDown } from "@phosphor-icons/react";
+import { CaretDown, Image as ImageIcon, VideoCamera } from "@phosphor-icons/react";
 
 type Stage = "idle" | "ready" | "working" | "done";
 
@@ -38,8 +41,10 @@ const DEFAULT_OPTIONS: ProcessingOptions = {
   detectionSensitivity: "auto",
 };
 
-export function WorkspaceApp() {
+export function WorkspaceApp({ initialKind = "video" }: { initialKind?: MediaKind }) {
+  const router = useRouter();
   const engine = useMemo(() => createProcessingEngine(), []);
+  const [mediaKind, setMediaKind] = useState<MediaKind>(initialKind);
   const [file, setFile] = useState<File | null>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [cleanedUrl, setCleanedUrl] = useState<string | null>(null);
@@ -80,9 +85,17 @@ export function WorkspaceApp() {
     setError(null);
   }, [cleanedUrl, engine, objectUrl]);
 
+  const selectKind = useCallback(
+    (kind: MediaKind) => {
+      setMediaKind(kind);
+      router.replace(kind === "image" ? "/app?kind=image" : "/app?kind=video");
+    },
+    [router],
+  );
+
   const loadFile = useCallback(
     async (next: File) => {
-      const validation = validateFile(next);
+      const validation = validateFile(next, mediaKind);
       if (!validation.ok) {
         setError(validation.message);
         toast.error(validation.message);
@@ -111,7 +124,7 @@ export function WorkspaceApp() {
         toast.error(message);
       }
     },
-    [cleanedUrl, engine, objectUrl],
+    [cleanedUrl, engine, mediaKind, objectUrl],
   );
 
   const process = useCallback(
@@ -208,7 +221,26 @@ export function WorkspaceApp() {
             onDrop={onDrop}
             className="flex min-h-[420px] flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-card/40 px-6 text-center"
           >
-            <p className="text-2xl font-medium tracking-tight">Drop your video here</p>
+            <ToggleGroup
+              value={[mediaKind]}
+              onValueChange={(next) => {
+                const kind = parseMediaKind(next[0]);
+                if (kind) selectKind(kind);
+              }}
+              className="mb-8 border border-border p-1"
+            >
+              <ToggleGroupItem value="video" aria-label="Clean a video">
+                <VideoCamera data-icon="inline-start" />
+                Video
+              </ToggleGroupItem>
+              <ToggleGroupItem value="image" aria-label="Clean a photo">
+                <ImageIcon data-icon="inline-start" />
+                Photo
+              </ToggleGroupItem>
+            </ToggleGroup>
+            <p className="text-2xl font-medium tracking-tight">
+              {mediaKind === "image" ? "Drop your photo here" : "Drop your video here"}
+            </p>
             <p className="mt-2 text-sm text-muted-foreground">or</p>
             <Button className="mt-4" onClick={() => inputRef.current?.click()}>
               Browse files
@@ -217,22 +249,31 @@ export function WorkspaceApp() {
               ref={inputRef}
               type="file"
               className="hidden"
-              accept="video/mp4,video/webm,image/png,image/jpeg,image/webp"
+              accept={
+                mediaKind === "image"
+                  ? "image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+                  : "video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov"
+              }
               onChange={(event) => {
                 const next = event.target.files?.[0];
                 if (next) void loadFile(next);
               }}
             />
             <p className="mt-8 text-sm text-muted-foreground">
-              Supported: MP4, WebM, PNG, JPG, WebP
+              {mediaKind === "image"
+                ? "Supported: PNG, JPG, WebP"
+                : "Supported: MP4, WebM"}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Maximum: {Math.round(FILE_LIMITS.videoBytes / (1024 * 1024))} MB video,{" "}
-              {Math.round(FILE_LIMITS.imageBytes / (1024 * 1024))} MB images
+              Maximum:{" "}
+              {mediaKind === "image"
+                ? `${Math.round(FILE_LIMITS.imageBytes / (1024 * 1024))} MB`
+                : `${Math.round(FILE_LIMITS.videoBytes / (1024 * 1024))} MB`}
             </p>
             <p className="mt-6 text-sm">Your media stays on your device.</p>
             <p className="mt-1 max-w-md text-sm text-muted-foreground">
-              Processing happens locally in your browser. Your video is never uploaded.
+              Processing happens locally in your browser. Your{" "}
+              {mediaKind === "image" ? "photo" : "video"} is never uploaded.
             </p>
           </div>
         ) : null}
@@ -290,7 +331,9 @@ export function WorkspaceApp() {
                   </p>
                   <p className="mt-1 text-sm">
                     {detection.detected
-                      ? "Detected: Google Flow visible overlay"
+                      ? metadata.kind === "image"
+                        ? "Detected: Google Gemini visible overlay"
+                        : "Detected: Google Flow visible overlay"
                       : "No supported overlay found"}
                   </p>
                   <p className="mt-1 text-sm text-muted-foreground">
@@ -309,9 +352,11 @@ export function WorkspaceApp() {
                 >
                   {adjusting ? "Region locked" : "Adjust Region"}
                 </Button>
-                <Button variant="outline" onClick={() => void process(true)} disabled={stage === "working"}>
-                  Generate Preview
-                </Button>
+                {metadata.kind === "video" ? (
+                  <Button variant="outline" onClick={() => void process(true)} disabled={stage === "working"}>
+                    Generate Preview
+                  </Button>
+                ) : null}
                 <Button onClick={() => void process(false)} disabled={stage === "working"}>
                   Clean Entire {metadata.kind === "video" ? "Video" : "Image"}
                 </Button>
@@ -351,22 +396,24 @@ export function WorkspaceApp() {
                       <option value="maximum">Maximum</option>
                     </select>
                   </label>
-                  <label className="flex items-center justify-between gap-3">
-                    Preview
-                    <select
-                      className="rounded-md border border-border bg-background px-2 py-1"
-                      value={options.previewDuration}
-                      onChange={(event) =>
-                        setOptions((current) => ({
-                          ...current,
-                          previewDuration: Number(event.target.value) as 5 | 10,
-                        }))
-                      }
-                    >
-                      <option value={5}>5 sec</option>
-                      <option value={10}>10 sec</option>
-                    </select>
-                  </label>
+                  {metadata.kind === "video" ? (
+                    <label className="flex items-center justify-between gap-3">
+                      Preview
+                      <select
+                        className="rounded-md border border-border bg-background px-2 py-1"
+                        value={options.previewDuration}
+                        onChange={(event) =>
+                          setOptions((current) => ({
+                            ...current,
+                            previewDuration: Number(event.target.value) as 5 | 10,
+                          }))
+                        }
+                      >
+                        <option value={5}>5 sec</option>
+                        <option value={10}>10 sec</option>
+                      </select>
+                    </label>
+                  ) : null}
                   <label className="flex items-center justify-between gap-3">
                     Detection
                     <select

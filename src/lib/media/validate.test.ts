@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyFile, formatBytes, formatDuration, validateFile } from "./validate";
+import { classifyFile, formatBytes, formatDuration, parseMediaKind, validateFile } from "./validate";
 
 function fakeFile(name: string, type: string, size: number): File {
   const blob = new Blob([new Uint8Array(Math.min(size, 8))], { type });
@@ -27,6 +27,26 @@ describe("file validation", () => {
     const result = validateFile(fakeFile("huge.mp4", "video/mp4", 501 * 1024 * 1024));
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("too-large");
+  });
+
+  it("rejects a video when the photo option is selected", () => {
+    const result = validateFile(fakeFile("clip.mp4", "video/mp4", 1200), "image");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("wrong-kind");
+  });
+
+  it("accepts a JPEG when the photo option is selected", () => {
+    const result = validateFile(fakeFile("still.jpg", "image/jpeg", 1200), "image");
+    expect(result).toEqual({ ok: true, kind: "image" });
+  });
+});
+
+describe("media kind from URL", () => {
+  it("maps photo aliases to image", () => {
+    expect(parseMediaKind("photo")).toBe("image");
+    expect(parseMediaKind("image")).toBe("image");
+    expect(parseMediaKind("video")).toBe("video");
+    expect(parseMediaKind("other")).toBeNull();
   });
 });
 

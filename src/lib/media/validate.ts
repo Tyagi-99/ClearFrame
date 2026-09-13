@@ -11,7 +11,8 @@ export type ValidationErrorCode =
   | "unsupported-type"
   | "too-large"
   | "empty"
-  | "too-long";
+  | "too-long"
+  | "wrong-kind";
 
 export type ValidationResult =
   | { ok: true; kind: MediaKind }
@@ -20,6 +21,15 @@ export type ValidationResult =
 function extensionOf(name: string): string {
   const idx = name.lastIndexOf(".");
   return idx >= 0 ? name.slice(idx).toLowerCase() : "";
+}
+
+export function parseMediaKind(value: string | null | undefined): MediaKind | null {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "image" || normalized === "photo" || normalized === "photos") {
+    return "image";
+  }
+  if (normalized === "video") return "video";
+  return null;
 }
 
 export function classifyFile(file: File): MediaKind | null {
@@ -39,7 +49,7 @@ export function classifyFile(file: File): MediaKind | null {
   return null;
 }
 
-export function validateFile(file: File): ValidationResult {
+export function validateFile(file: File, expectedKind?: MediaKind): ValidationResult {
   if (file.size <= 0) {
     return {
       ok: false,
@@ -54,6 +64,17 @@ export function validateFile(file: File): ValidationResult {
       ok: false,
       code: "unsupported-type",
       message: "Your browser could not process this video format. Try MP4/H.264 or use a Chromium-based browser.",
+    };
+  }
+
+  if (expectedKind && kind !== expectedKind) {
+    return {
+      ok: false,
+      code: "wrong-kind",
+      message:
+        expectedKind === "image"
+          ? "This option is for photos. Drop a PNG, JPG, or WebP, or switch to Video."
+          : "This option is for video. Drop an MP4 or WebM, or switch to Photo.",
     };
   }
 
